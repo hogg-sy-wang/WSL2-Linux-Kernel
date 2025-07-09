@@ -216,6 +216,7 @@ static int raw_enable_errfilter(struct net *net, struct net_device *dev,
 				struct sock *sk, can_err_mask_t err_mask)
 {
 	int err = 0;
+	printk(KERN_INFO "err_mask is %d", err_mask);
 
 	if (err_mask)
 		err = can_rx_register(net, dev, 0, err_mask | CAN_ERR_FLAG,
@@ -617,6 +618,8 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 		break;
 
 	case CAN_RAW_ERR_FILTER:
+		printk(KERN_INFO "I am in CAN_RAW_ERR_FILTER");
+
 		if (optlen != sizeof(err_mask))
 			return -EINVAL;
 
@@ -631,6 +634,7 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 		dev = ro->dev;
 		if (ro->bound && dev) {
 			if (dev->reg_state != NETREG_REGISTERED) {
+				printk(KERN_INFO "ENODEV");
 				err = -ENODEV;
 				goto out_err;
 			}
@@ -641,6 +645,7 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 			/* (try to) register the new err_mask */
 			err = raw_enable_errfilter(sock_net(sk), dev, sk,
 						   err_mask);
+			printk(KERN_INFO "Enable err_filter: %d", err);
 
 			if (err)
 				goto out_err;
@@ -727,6 +732,7 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 	default:
 		return -ENOPROTOOPT;
 	}
+	printk(KERN_INFO "optname: %d, err: %d", optname, err);
 	return err;
 }
 
@@ -854,6 +860,7 @@ static int raw_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 	struct net_device *dev;
 	int ifindex;
 	int err = -EINVAL;
+	int hogg = 0;
 
 	/* check for valid CAN frame sizes */
 	if (size < CANXL_HDR_SIZE + CANXL_MIN_DLEN || size > CANXL_MTU)
@@ -892,7 +899,9 @@ static int raw_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 		goto free_skb;
 
 	err = -EINVAL;
-	if (raw_bad_txframe(ro, skb, dev->mtu))
+	hogg = raw_bad_txframe(ro, skb, dev->mtu);
+	printk(KERN_INFO "raw bad txframe: %d", hogg);
+	if (hogg)
 		goto free_skb;
 
 	sockcm_init(&sockc, sk);
@@ -901,6 +910,7 @@ static int raw_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 		if (unlikely(err))
 			goto free_skb;
 	}
+	printk(KERN_INFO "Send! - %d", size);
 
 	skb->dev = dev;
 	skb->priority = sk->sk_priority;
@@ -919,13 +929,21 @@ static int raw_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 	}
 
 	skb_setup_tx_timestamp(skb, sockc.tsflags);
+	printk(KERN_INFO "Send 1 - %d", size);
 
 	err = can_send(skb, ro->loopback);
+	printk(KERN_INFO "err - %d", err);
+	printk(KERN_INFO "Send 2 - %d", size);
 
 	dev_put(dev);
+	printk(KERN_INFO "Send 3 - %d", size);
 
-	if (err)
+	if (err) {
+	    printk(KERN_INFO "Send err - %d", size);
 		goto send_failed;
+	}
+
+	printk(KERN_INFO "Send 4 - %d", size);
 
 	return size;
 
@@ -944,13 +962,25 @@ static int raw_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 	struct sk_buff *skb;
 	int err = 0;
 
-	if (flags & MSG_ERRQUEUE)
+	printk(KERN_INFO "RECV");
+	printk(KERN_INFO "size: %d", size);
+	printk(KERN_INFO "flags: %d", flags);
+
+	if (flags & MSG_ERRQUEUE) {
+		printk(KERN_INFO "I am in MSG_ERRQUEUE");
+
 		return sock_recv_errqueue(sk, msg, size,
 					  SOL_CAN_RAW, SCM_CAN_RAW_ERRQUEUE);
+	}
 
 	skb = skb_recv_datagram(sk, flags, &err);
+	printk(KERN_INFO "skb: %d", skb);
+	printk(KERN_INFO "RECV 1 - %d", size);
+
 	if (!skb)
 		return err;
+
+	printk(KERN_INFO "RECV 2 - %d", size);
 
 	if (size < skb->len)
 		msg->msg_flags |= MSG_TRUNC;
@@ -958,14 +988,21 @@ static int raw_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 		size = skb->len;
 
 	err = memcpy_to_msg(msg, skb->data, size);
+	printk(KERN_INFO "RECV 3 - %d", size);
+
 	if (err < 0) {
+		printk(KERN_INFO "RECV 3-err!");
 		skb_free_datagram(sk, skb);
 		return err;
 	}
 
+	printk(KERN_INFO "RECV 4 - %d", size);
+
 	sock_recv_cmsgs(msg, sk, skb);
+	printk(KERN_INFO "RECV 5 - %d", size);
 
 	if (msg->msg_name) {
+		printk(KERN_INFO "RECV 5-msg_name is not empty");
 		__sockaddr_check_size(RAW_MIN_NAMELEN);
 		msg->msg_namelen = RAW_MIN_NAMELEN;
 		memcpy(msg->msg_name, skb->cb, msg->msg_namelen);
@@ -975,6 +1012,7 @@ static int raw_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 	msg->msg_flags |= *(raw_flags(skb));
 
 	skb_free_datagram(sk, skb);
+	printk(KERN_INFO "RECV 6 - %d", size);
 
 	return size;
 }
